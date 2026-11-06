@@ -1,8 +1,8 @@
 # The Little Animal Express — DSA Project
 
-A terminal-only C gacha / collection / battle prototype. Standard C library only.
+A cozy terminal RPG in C. Build it with `make` and start it with `./animal_gacha`.
 
-## Build (macOS / Linux)
+## Build and play (macOS / Linux)
 
 ```sh
 make
@@ -13,45 +13,30 @@ Or compile manually:
 
 ```sh
 clang -std=c11 -Wall -Wextra -Wpedantic -Iinclude \
-  main.c game.c hash_table.c linked_list.c graph.c queue.c stack.c tree.c \
+  main.c game.c character.c hash_table.c linked_list.c graph.c queue.c stack.c tree.c \
   -o animal_gacha
 ```
 
-## Data structures demonstrated
+## The journey
 
-| Structure / algorithm | Where it is used |
+- Meet the full roster, each with a small original ASCII portrait and role/stat card.
+- Miso, Clover, and Bean join for free; Toast, Pebble, Luna, and Comet can join through the warp.
+- Your collection is saved to `save.txt` when you save or leave.
+- Relics can be searched and equipped for combat stat bonuses.
+- Explore the character-synergy graph.
+- Send your team down the forest path for automatic, speed-ordered battles. Each animal uses role-aware behavior: healers patch up hurt friends, Bean guards when in danger, and attackers focus wounded enemies. Health bars and a round-by-round battle log make the fight easy to follow.
+- Gacha pity and featured guarantee status persist between runs.
+
+## Data structures in the game
+
+| Structure | Use |
 |---|---|
-| Hash table with separate chaining | Character catalogue lookup by ID |
-| Singly linked list | Player-owned character collection; duplicate copies update existing nodes |
-| Undirected graph, adjacency lists | Character synergy network |
-| Breadth-first search (BFS) | Explore characters connected to Miso |
-| Circular queue | Rotate battle turns |
-| Stack (LIFO) | Recent battle action history |
-| Binary search tree | Relic name index; in-order traversal prints sorted names |
-| Arrays | Character pools, graph adjacency storage, queue backing storage |
-| File I/O | Save/load owned characters in `save.txt` |
+| Hash table | Character catalogue lookup |
+| Singly linked list | Owned collection and duplicate copies |
+| Undirected graph + BFS | Character synergy network |
+| Circular queue | Each round's speed-ordered battle turns |
+| Stack | Recent battle story/history |
+| Binary search tree | Sorted relic index |
+| File I/O | Persist collection and banner pity |
 
-## Current gameplay
-
-- Miso, Clover, and Bean are free starters.
-- Toast and Pebble are 4-star gacha characters.
-- Luna and Comet are 5-star gacha characters.
-- Pulls update the linked-list collection; duplicates increase copies and bond level.
-- Collection is saved automatically on exit and can be saved from the menu.
-- Practice battle demonstrates a circular turn queue and action-history stack.
-
-## Important prototype assumptions
-
-- Gacha rates are project-defined: 0.6% 5-star base chance, 6% 4-star chance, hard pity at 90 for 5-star and 10 for 4-star. A 5-star takes priority over a 4-star.
-- The two 5-star characters are selected evenly from the small featured pool. This prototype does not yet model a separate off-banner/50-50 system; `featured_guaranteed` is reserved for a future banner implementation.
-- The relic BST is a small demo index, not yet attached to character equipment.
-- Battle is a data-structure demonstration, not a full combat simulator.
-- Catalogue and player collection are intentionally separate: all seven characters are searchable in the catalogue, but only the three starters are initially owned.
-
-## Suggested next upgrades
-
-1. Add an actual featured-banner guarantee / banner selection.
-2. Equip relics to owned characters and calculate stat bonuses.
-3. Add a real battle loop with speed-based turn order.
-4. Add collection sorting and filtering.
-5. Add stronger save-file validation and persistence of gacha pity.
+All combat is automatic; choose the activity from the menu and watch the squad fight. The project uses only the standard C library.

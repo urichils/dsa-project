@@ -16,4 +16,6 @@ typedef struct {
     char role[ROLE_LEN];
 } Character;
 
+void character_print_art(const Character *character);
+
 #endif

@@ -7,112 +7,71 @@
 
 typedef struct {
     char name[NAME_LEN];
-    int hp;
-    int max_hp;
-    int attack;
-    int defense;
-    int speed;
+    int hp, max_hp, attack, defense, speed;
     int is_enemy;
-    int slot;
-    int guard;
+    int party_index;
+    int guarding;
 } BattleActor;
 
 static Character make(const char *id, const char *name, int rarity, int hp, int atk, int def, int spd, const char *role) {
     Character c = {0};
     snprintf(c.id, sizeof(c.id), "%s", id);
     snprintf(c.name, sizeof(c.name), "%s", name);
-    c.rarity = rarity;
-    c.hp = hp;
-    c.attack = atk;
-    c.defense = def;
-    c.speed = spd;
+    c.rarity = rarity; c.hp = hp; c.attack = atk; c.defense = def; c.speed = spd;
     snprintf(c.role, sizeof(c.role), "%s", role);
     return c;
 }
 
 static void battle_log(Game *g, const char *fmt, ...) {
+    char text[160];
     va_list args;
-    char buffer[160];
     va_start(args, fmt);
-    vsnprintf(buffer, sizeof(buffer), fmt, args);
+    vsnprintf(text, sizeof(text), fmt, args);
     va_end(args);
-    stack_push(&g->history, buffer);
-    puts(buffer);
+    stack_push(&g->history, text);
+    printf("  %s\n", text);
 }
 
 static int relic_value_for_name(const char *name) {
-    if (strstr(name, "Crown") || strstr(name, "Talisman")) return 14;
+    if (strstr(name, "Crown")) return 14;
     if (strstr(name, "Bell") || strstr(name, "Pendant")) return 12;
     if (strstr(name, "Scarf") || strstr(name, "Charm")) return 10;
-    if (strstr(name, "Boots") || strstr(name, "Ring")) return 9;
+    if (strstr(name, "Boots")) return 9;
     return 8;
 }
 
-static void ensure_party_slots(Game *g, OwnedNode *party[MAX_PARTY], int *party_count) {
-    const char *starter_ids[] = {"miso", "clover", "bean"};
-    for (int i = 0; i < (int)(sizeof(starter_ids) / sizeof(starter_ids[0])); i++) {
-        int already = 0;
-        for (int j = 0; j < *party_count; j++) {
-            if (party[j] && strcmp(party[j]->character.id, starter_ids[i]) == 0) {
-                already = 1;
-                break;
-            }
-        }
-        if (!already) {
-            Character *starter = hash_table_find(&g->catalogue, starter_ids[i]);
-            if (starter) {
-                OwnedNode *node = NULL;
-                for (OwnedNode *n = g->collection.head; n; n = n->next) {
-                    if (strcmp(n->character.id, starter_ids[i]) == 0) {
-                        node = n;
-                        break;
-                    }
-                }
-                if (!node) {
-                    if (collection_add(&g->collection, starter) > 0) {
-                        for (OwnedNode *n = g->collection.head; n; n = n->next) {
-                            if (strcmp(n->character.id, starter_ids[i]) == 0) {
-                                node = n;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (node && *party_count < MAX_PARTY) {
-                    party[*party_count] = node;
-                    (*party_count)++;
-                }
-            }
-        }
-    }
+static OwnedNode *find_owned(Game *g, const char *id) {
+    for (OwnedNode *n = g->collection.head; n; n = n->next)
+        if (strcmp(n->character.id, id) == 0) return n;
+    return NULL;
 }
 
-static void collect_party(Game *g, OwnedNode *party[MAX_PARTY], int *party_count) {
-    *party_count = 0;
-    for (OwnedNode *n = g->collection.head; n && *party_count < MAX_PARTY; n = n->next) {
-        if (n->character.id[0] != '\0') {
-            party[*party_count] = n;
-            (*party_count)++;
-        }
+static int add_starter_if_missing(Game *g, const char *id) {
+    if (find_owned(g, id)) return 1;
+    Character *c = hash_table_find(&g->catalogue, id);
+    return c && collection_add(&g->collection, c) >= 0;
+}
+
+static void collect_party(Game *g, OwnedNode *party[MAX_PARTY], int *count) {
+    static const char *preferred[] = {"miso", "clover", "bean"};
+    *count = 0;
+    for (int i = 0; i < MAX_PARTY; i++) {
+        add_starter_if_missing(g, preferred[i]);
+        OwnedNode *n = find_owned(g, preferred[i]);
+        if (n) party[(*count)++] = n;
     }
-    ensure_party_slots(g, party, party_count);
+    for (OwnedNode *n = g->collection.head; n && *count < MAX_PARTY; n = n->next) {
+        int exists = 0;
+        for (int i = 0; i < *count; i++) if (party[i] == n) exists = 1;
+        if (!exists) party[(*count)++] = n;
+    }
 }
 
 void game_init(Game *g) {
-    hash_table_init(&g->catalogue);
-    collection_init(&g->collection);
-    graph_init(&g->synergy);
-    queue_init(&g->turns);
-    stack_init(&g->history);
-    g->relics = relic_tree_create_demo();
-    g->pity5 = 0;
-    g->pity4 = 0;
-    g->featured_guaranteed = 0;
-    for (int i = 0; i < MAX_PARTY; i++) {
-        g->relic_slots[i][0] = '\0';
-        g->relic_bonus[i] = 0;
-    }
-
+    hash_table_init(&g->catalogue); collection_init(&g->collection); graph_init(&g->synergy);
+    queue_init(&g->turns); stack_init(&g->history); g->relics = relic_tree_create_demo();
+    g->pity5 = 0; g->pity4 = 0; g->featured_guaranteed = 0;
+    for (int i = 0; i < MAX_PARTY; i++) { g->relic_slots[i][0] = '\0'; g->relic_bonus[i] = 0; }
     Character c[] = {
         make("miso", "Miso", 4, 900, 120, 80, 110, "Support"),
         make("clover", "Clover", 4, 1100, 90, 100, 100, "Healer"),
@@ -122,18 +81,10 @@ void game_init(Game *g) {
         make("luna", "Luna", 5, 1200, 220, 100, 115, "Support"),
         make("comet", "Comet", 5, 1400, 260, 130, 90, "Attacker")
     };
-
-    for (size_t i = 0; i < sizeof(c) / sizeof(c[0]); i++) {
-        hash_table_insert(&g->catalogue, &c[i]);
-    }
-
-    Character *starter = hash_table_find(&g->catalogue, "miso");
-    collection_add(&g->collection, starter);
-    starter = hash_table_find(&g->catalogue, "clover");
-    collection_add(&g->collection, starter);
-    starter = hash_table_find(&g->catalogue, "bean");
-    collection_add(&g->collection, starter);
-
+    for (size_t i = 0; i < sizeof(c) / sizeof(c[0]); i++) hash_table_insert(&g->catalogue, &c[i]);
+    collection_add(&g->collection, hash_table_find(&g->catalogue, "miso"));
+    collection_add(&g->collection, hash_table_find(&g->catalogue, "clover"));
+    collection_add(&g->collection, hash_table_find(&g->catalogue, "bean"));
     graph_add_edge(&g->synergy, "Miso", "Clover", 15);
     graph_add_edge(&g->synergy, "Clover", "Bean", 10);
     graph_add_edge(&g->synergy, "Toast", "Comet", 20);
@@ -142,73 +93,104 @@ void game_init(Game *g) {
 }
 
 void game_free(Game *g) {
-    hash_table_free(&g->catalogue);
-    collection_free(&g->collection);
-    relic_tree_free(g->relics);
-    g->relics = NULL;
+    hash_table_free(&g->catalogue); collection_free(&g->collection);
+    relic_tree_free(g->relics); g->relics = NULL;
 }
 
 void game_gacha(Game *g, int pulls) {
     const char *pool4[] = {"toast", "pebble"};
     const char *pool5[] = {"luna", "comet"};
-    const char *featured_pool[] = {"luna", "comet"};
-
     for (int i = 0; i < pulls; i++) {
         int roll = rand() % 10000;
         const char *id = NULL;
-
-        if (g->pity5 >= 89) {
-            id = featured_pool[rand() % 2];
-            g->pity5 = 0;
-            g->pity4 = 0;
-            g->featured_guaranteed = 0;
-        } else if (roll < 60) {
-            if (g->featured_guaranteed) {
-                id = featured_pool[rand() % 2];
-                g->featured_guaranteed = 0;
-            } else {
-                id = (rand() % 100 < 50) ? featured_pool[rand() % 2] : ((rand() % 2 == 0) ? "luna" : "comet");
-            }
-            g->pity5 = 0;
-            g->pity4 = 0;
+        if (g->pity5 >= 89 || roll < 60) {
+            int five_star = g->featured_guaranteed || g->pity5 >= 89 || (rand() % 2 == 0);
+            id = pool5[rand() % 2];
+            if (!five_star) g->featured_guaranteed = 1;
+            else g->featured_guaranteed = 0;
+            g->pity5 = 0; g->pity4 = 0;
         } else if (g->pity4 >= 9 || roll < 600) {
-            id = pool4[rand() % 2];
-            g->pity4 = 0;
-            g->pity5++;
+            id = pool4[rand() % 2]; g->pity4 = 0; g->pity5++;
         } else {
-            g->pity4++;
-            g->pity5++;
-            printf("  No pull this time. Pity: 5-star %d/90 | 4-star %d/10\n", g->pity5, g->pity4);
+            g->pity4++; g->pity5++;
+            printf("  No new friend. Pity: 5★ %d/90, 4★ %d/10\n", g->pity5, g->pity4);
             continue;
         }
-
-        Character *ch = hash_table_find(&g->catalogue, id);
-        if (!ch) {
-            puts("  The warp fizzled. Please try again.");
-            continue;
+        Character *c = hash_table_find(&g->catalogue, id);
+        if (c) {
+            collection_add(&g->collection, c);
+            printf("  ★%d %s joined your squad!\n", c->rarity, c->name);
+            character_print_art(c);
         }
-
-        collection_add(&g->collection, ch);
-        printf("  ★%d  %s joined your squad!\n", ch->rarity, ch->name);
     }
-
-    printf("Pity status: 5-star %d/90 | 4-star %d/10\n", g->pity5, g->pity4);
-    puts("Featured banner status: active guarantee available.");
+    printf("Pity: 5★ %d/90 | 4★ %d/10 | featured guarantee: %s\n",
+           g->pity5, g->pity4, g->featured_guaranteed ? "next 5-star guaranteed" : "not active");
 }
 
-static void battle_enemy_team(BattleActor *actors, int *count) {
-    static const char *names[] = {"Moss Rat", "Leafling", "Stump Beetle"};
-    for (int i = 0; i < 3; i++) {
-        snprintf(actors[*count].name, sizeof(actors[*count].name), "%s", names[i]);
-        actors[*count].max_hp = 120 + i * 40;
-        actors[*count].hp = actors[*count].max_hp;
-        actors[*count].attack = 24 + i * 8;
-        actors[*count].defense = 8 + i * 3;
-        actors[*count].speed = 80 + i * 12;
-        actors[*count].is_enemy = 1;
-        actors[*count].slot = i;
-        actors[*count].guard = 0;
-        (*count)++;
+static void show_battlefield(const BattleActor *actors, int count, int round) {
+    printf("\n--- ROUND %d ---\n", round);
+    puts("YOUR TEAM");
+    for (int i = 0; i < count; i++) if (!actors[i].is_enemy) {
+        printf(" %-9s ", actors[i].name);
+        int bars = actors[i].max_hp > 0 ? actors[i].hp * 16 / actors[i].max_hp : 0;
+        if (bars < 0) bars = 0;
+        printf("[");
+        for (int b = 0; b < 16; b++) putchar(b < bars ? '#' : '-');
+        printf("] %d/%d%s\n", actors[i].hp, actors[i].max_hp, actors[i].hp ? "" : " KO");
+    }
+    puts("WILD TEAM");
+    for (int i = 0; i < count; i++) if (actors[i].is_enemy) {
+        printf(" %-12s ", actors[i].name);
+        int bars = actors[i].max_hp > 0 ? actors[i].hp * 16 / actors[i].max_hp : 0;
+        if (bars < 0) bars = 0;
+        printf("[");
+        for (int b = 0; b < 16; b++) putchar(b < bars ? '#' : '-');
+        printf("] %d/%d%s\n", actors[i].hp, actors[i].max_hp, actors[i].hp ? "" : " KO");
+    }
+}
+
+static int lowest_hp_actor(const BattleActor *actors, int count, int enemy_side, int missing_only) {
+    int best = -1;
+    for (int i = 0; i < count; i++) {
+        if (actors[i].hp <= 0 || actors[i].is_enemy != enemy_side) continue;
+        if (missing_only && actors[i].hp == actors[i].max_hp) continue;
+        if (best < 0 || actors[i].hp < actors[best].hp) best = i;
+    }
+    return best;
+}
+
+static void take_auto_turn(Game *g, BattleActor *actors, int count, int current) {
+    BattleActor *actor = &actors[current];
+    if (actor->is_enemy) {
+        int target = lowest_hp_actor(actors, count, 0, 0);
+        if (target < 0) return;
+        int damage = actor->attack + rand() % 10 - actors[target].defense / 3;
+        if (actors[target].guarding) { damage /= 2; actors[target].guarding = 0; }
+        if (damage < 3) damage = 3;
+        actors[target].hp -= damage;
+        if (actors[target].hp < 0) actors[target].hp = 0;
+        battle_log(g, "%s lunges at %s for %d damage!", actor->name, actors[target].name, damage);
+        return;
+    }
+
+    int heal_target = lowest_hp_actor(actors, count, 0, 1);
+    int enemy = lowest_hp_actor(actors, count, 1, 0);
+    int threshold = actor->max_hp * 2 / 3;
+    if ((!strcmp(actor->name, "Clover") || !strcmp(actor->name, "Luna")) && heal_target >= 0 && actors[heal_target].hp < threshold) {
+        int heal = !strcmp(actor->name, "Luna") ? 100 : 75;
+        actors[heal_target].hp += heal;
+        if (actors[heal_target].hp > actors[heal_target].max_hp) actors[heal_target].hp = actors[heal_target].max_hp;
+        battle_log(g, "%s uses a soothing skill: %s recovers HP!", actor->name, actors[heal_target].name);
+    } else if (!strcmp(actor->name, "Bean") && actor->hp < actor->max_hp / 2 && !actor->guarding) {
+        actor->guarding = 1;
+        battle_log(g, "%s plants his feet and guards against the next hit!", actor->name);
+    } else if (enemy >= 0) {
+        int damage = actor->attack + rand() % 16 - actors[enemy].defense / 3;
+        if (!strcmp(actor->name, "Toast") || !strcmp(actor->name, "Comet")) damage += 15;
+        if (damage < 4) damage = 4;
+        actors[enemy].hp -= damage;
+        if (actors[enemy].hp < 0) actors[enemy].hp = 0;
+        battle_log(g, "%s attacks %s for %d damage!", actor->name, actors[enemy].name, damage);
     }
 }
 
@@ -216,260 +198,130 @@ void game_battle_play(Game *g) {
     OwnedNode *party[MAX_PARTY] = {0};
     int party_count = 0;
     collect_party(g, party, &party_count);
+    if (!party_count) { puts("Your squad is empty."); return; }
 
-    if (party_count <= 0) {
-        puts("Your squad is empty. Pull a few animal allies first.");
-        return;
-    }
-
-    if (party_count < MAX_PARTY) {
-        puts("You can only fight with the first three allies in your collection.");
-    }
-
-    BattleActor actors[6] = {{0}};
-    int actor_count = 0;
-
-    for (int i = 0; i < party_count && i < MAX_PARTY; i++) {
+    BattleActor actors[MAX_PARTY + MAX_ENEMIES] = {{0}};
+    int count = 0;
+    puts("\n=== FOREST PATH: AUTOMATIC BATTLE ===");
+    puts("Your animals choose actions using their roles. Faster friends act first.");
+    for (int i = 0; i < party_count; i++) {
         Character *c = &party[i]->character;
-        snprintf(actors[actor_count].name, sizeof(actors[actor_count].name), "%s", c->name);
-        actors[actor_count].max_hp = c->hp + party[i]->level * 25 + g->relic_bonus[i];
-        actors[actor_count].hp = actors[actor_count].max_hp;
-        actors[actor_count].attack = c->attack + g->relic_bonus[i] / 2;
-        actors[actor_count].defense = c->defense + g->relic_bonus[i] / 3;
-        actors[actor_count].speed = c->speed + party[i]->level * 5;
-        actors[actor_count].is_enemy = 0;
-        actors[actor_count].slot = i;
-        actors[actor_count].guard = 0;
-        actor_count++;
+        BattleActor *a = &actors[count++];
+        snprintf(a->name, sizeof(a->name), "%s", c->name);
+        a->max_hp = c->hp + party[i]->level * 25 + g->relic_bonus[i];
+        a->hp = a->max_hp;
+        a->attack = c->attack + g->relic_bonus[i] / 2;
+        a->defense = c->defense + g->relic_bonus[i] / 3;
+        a->speed = c->speed + party[i]->level * 5;
+        a->party_index = i;
+        if (i == 0) character_print_art(c);
+    }
+    static const char *enemy_names[] = {"Moss Rat", "Leafling", "Stump Beetle"};
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        BattleActor *a = &actors[count++];
+        snprintf(a->name, sizeof(a->name), "%s", enemy_names[i]);
+        a->hp = a->max_hp = 180 + i * 55;
+        a->attack = 30 + i * 7; a->defense = 12 + i * 4; a->speed = 95 + i * 8;
+        a->is_enemy = 1;
     }
 
-    battle_enemy_team(actors, &actor_count);
-
-    int order[6];
-    int active = actor_count;
-    for (int i = 0; i < active; i++) order[i] = i;
-    for (int i = 1; i < active; i++) {
-        int j = i;
-        while (j > 0 && actors[order[j - 1]].speed < actors[order[j]].speed) {
-            int tmp = order[j - 1];
-            order[j - 1] = order[j];
-            order[j] = tmp;
-            j--;
-        }
-    }
-
-    queue_init(&g->turns);
-    for (int i = 0; i < active; i++) queue_enqueue(&g->turns, order[i]);
-
-    puts("\n=== BATTLE: LITTLE ANIMALS VS. WILD FOREST CREATURES ===");
-    puts("Use the queue to keep turns in speed order and the stack to log actions.");
-
-    int player_alive = 0;
-    int enemy_alive = 0;
-    int rounds = 0;
-
-    while (!queue_is_empty(&g->turns) && rounds < 30) {
-        rounds++;
-        int current = -1;
-        if (!queue_dequeue(&g->turns, &current)) break;
-        if (current < 0 || current >= actor_count) continue;
-        if (actors[current].hp <= 0) continue;
-
-        player_alive = 0;
-        enemy_alive = 0;
-        for (int i = 0; i < actor_count; i++) {
-            if (actors[i].hp > 0 && !actors[i].is_enemy) player_alive = 1;
-            if (actors[i].hp > 0 && actors[i].is_enemy) enemy_alive = 1;
-        }
-
-        if (!player_alive || !enemy_alive) break;
-
-        if (!actors[current].is_enemy) {
-            int target = -1;
-            for (int i = 0; i < actor_count; i++) {
-                if (actors[i].is_enemy && actors[i].hp > 0) {
-                    target = i;
-                    break;
-                }
-            }
-
-            int choice = 0;
-            printf("\n%s's turn. Choose action [1=Strike, 2=Guard, 3=Heal]: ", actors[current].name);
-            if (scanf("%d", &choice) != 1) {
-                choice = 1;
-                int ch;
-                while ((ch = getchar()) != '\n' && ch != EOF) { }
-            }
-
-            if (choice == 2) {
-                actors[current].guard = 1;
-                battle_log(g, "%s braces and raises a guard.", actors[current].name);
-            } else if (choice == 3) {
-                int heal = 35 + actors[current].attack / 4;
-                actors[current].hp += heal;
-                if (actors[current].hp > actors[current].max_hp) actors[current].hp = actors[current].max_hp;
-                battle_log(g, "%s heals %d HP.", actors[current].name, heal);
-            } else {
-                if (target < 0) continue;
-                int damage = actors[current].attack + (rand() % 18);
-                int reduction = actors[target].defense / 2;
-                int final = damage - reduction;
-                if (final < 4) final = 4;
-                actors[target].hp -= final;
-                if (actors[target].hp < 0) actors[target].hp = 0;
-                battle_log(g, "%s hits %s for %d damage.", actors[current].name, actors[target].name, final);
-            }
-        } else {
-            int target = -1;
-            for (int i = 0; i < actor_count; i++) {
-                if (!actors[i].is_enemy && actors[i].hp > 0) {
-                    target = i;
-                    break;
-                }
-            }
-            if (target < 0) continue;
-
-            if (actors[current].guard) {
-                actors[current].guard = 0;
-            }
-
-            int damage = actors[current].attack + rand() % 12;
-            int reduction = actors[target].defense / 2;
-            int final = damage - reduction;
-            if (final < 3) final = 3;
-            actors[target].hp -= final;
-            if (actors[target].hp < 0) actors[target].hp = 0;
-            battle_log(g, "%s attacks %s for %d damage.", actors[current].name, actors[target].name, final);
-        }
-
-        if (actors[current].guard) {
-            actors[current].hp += 8;
-            if (actors[current].hp > actors[current].max_hp) actors[current].hp = actors[current].max_hp;
-        }
-
-        for (int i = 0; i < actor_count; i++) {
-            if (actors[i].hp > 0) {
-                queue_enqueue(&g->turns, i);
+    stack_init(&g->history);
+    int round = 0, players_alive, enemies_alive;
+    do {
+        round++;
+        int order[MAX_PARTY + MAX_ENEMIES], norder = 0;
+        for (int i = 0; i < count; i++) if (actors[i].hp > 0) order[norder++] = i;
+        for (int i = 1; i < norder; i++) {
+            int j = i;
+            while (j > 0 && actors[order[j - 1]].speed < actors[order[j]].speed) {
+                int temp = order[j - 1]; order[j - 1] = order[j]; order[j] = temp; j--;
             }
         }
-    }
+        queue_init(&g->turns);
+        for (int i = 0; i < norder; i++) queue_enqueue(&g->turns, order[i]);
+        show_battlefield(actors, count, round);
+        int current;
+        while (queue_dequeue(&g->turns, &current)) {
+            if (actors[current].hp <= 0) continue;
+            take_auto_turn(g, actors, count, current);
+            players_alive = enemies_alive = 0;
+            for (int i = 0; i < count; i++) if (actors[i].hp > 0) {
+                if (actors[i].is_enemy) enemies_alive++; else players_alive++;
+            }
+            if (!players_alive || !enemies_alive) break;
+        }
+        players_alive = enemies_alive = 0;
+        for (int i = 0; i < count; i++) if (actors[i].hp > 0) {
+            if (actors[i].is_enemy) enemies_alive++; else players_alive++;
+        }
+    } while (players_alive && enemies_alive && round < 40);
 
-    player_alive = 0;
-    enemy_alive = 0;
-    for (int i = 0; i < actor_count; i++) {
-        if (actors[i].hp > 0 && !actors[i].is_enemy) player_alive = 1;
-        if (actors[i].hp > 0 && actors[i].is_enemy) enemy_alive = 1;
-    }
-
-    if (player_alive && !enemy_alive) {
-        puts("\nVictory! Your squad wins the skirmish.");
-        battle_log(g, "Victory! The animals return to camp with treasure and stories.");
-    } else if (!player_alive && enemy_alive) {
-        puts("\nDefeat. The critters win this round.");
-        battle_log(g, "Defeat. The party retreats to regroup.");
+    show_battlefield(actors, count, round);
+    if (players_alive && !enemies_alive) {
+        puts("\nVICTORY! The forest path is clear. Your little guys celebrate!");
+        battle_log(g, "Victory! The squad clears the forest path.");
+    } else if (!players_alive) {
+        puts("\nThe wild creatures win this time. Your squad will be ready for another try.");
+        battle_log(g, "Defeat. The squad retreats to camp.");
     } else {
-        puts("\nThe battle ends in a draw after a long, exhausting chase.");
-        battle_log(g, "Draw. The forest settles back into silence.");
+        puts("\nThe battle ended in a draw.");
+        battle_log(g, "Draw. Both sides retreat.");
     }
 }
 
-void game_battle_demo(Game *g) {
-    game_battle_play(g);
-}
+void game_battle_demo(Game *g) { game_battle_play(g); }
 
 void game_show_relics(Game *g) {
-    puts("\n=== RELIC TREE (BST) ===");
+    puts("\n=== RELIC TREE — FIND ONE TO EQUIP ===");
     relic_tree_print(g->relics, 0);
-
+    puts("Enter the exact relic name with underscores instead of spaces, or - to cancel.");
     char query[48];
-    printf("Search relic name (or - to skip): ");
-    if (scanf("%47s", query) != 1) {
-        int ch;
-        while ((ch = getchar()) != '\n' && ch != EOF) { }
-        return;
-    }
-
-    if (strcmp(query, "-") == 0) {
-        return;
-    }
-
-    if (!relic_tree_contains(g->relics, query)) {
-        puts("Not found in the relic index.");
-        return;
-    }
-
+    printf("> ");
+    if (scanf("%47s", query) != 1) return;
+    for (int i = 0; query[i]; i++) if (query[i] == '_') query[i] = ' ';
+    if (!strcmp(query, "-")) return;
+    if (!relic_tree_contains(g->relics, query)) { puts("That relic is not in the index."); return; }
     OwnedNode *party[MAX_PARTY] = {0};
-    int party_count = 0;
-    collect_party(g, party, &party_count);
-
-    if (party_count <= 0) {
-        puts("No party to equip a relic to yet.");
-        return;
-    }
-
-    printf("Choose a squad member to equip this relic (1-%d): ", party_count);
-    int choice = 0;
-    if (scanf("%d", &choice) != 1) {
-        int ch;
-        while ((ch = getchar()) != '\n' && ch != EOF) { }
-        return;
-    }
-
-    if (choice < 1 || choice > party_count) {
-        puts("Invalid selection.");
-        return;
-    }
-
-    int idx = choice - 1;
-    snprintf(g->relic_slots[idx], sizeof(g->relic_slots[idx]), "%s", query);
-    g->relic_bonus[idx] = relic_value_for_name(query);
-    printf("%s equipped to %s. Bonus: +%d\n", query, party[idx]->character.name, g->relic_bonus[idx]);
+    int count = 0; collect_party(g, party, &count);
+    puts("Choose an animal:");
+    for (int i = 0; i < count; i++) printf(" %d) %s\n", i + 1, party[i]->character.name);
+    int choice;
+    if (scanf("%d", &choice) != 1 || choice < 1 || choice > count) { puts("Cancelled: invalid selection."); return; }
+    int slot = choice - 1;
+    snprintf(g->relic_slots[slot], sizeof(g->relic_slots[slot]), "%s", query);
+    g->relic_bonus[slot] = relic_value_for_name(query);
+    printf("%s equipped to %s (+%d to battle stats).\n", query, party[slot]->character.name, g->relic_bonus[slot]);
 }
 
 void game_save(const Game *g, const char *path) {
     FILE *f = fopen(path, "w");
-    if (!f) {
-        perror("save");
-        return;
-    }
-    for (OwnedNode *n = g->collection.head; n; n = n->next) {
+    if (!f) { perror("save"); return; }
+    for (OwnedNode *n = g->collection.head; n; n = n->next)
         fprintf(f, "%s %d %d\n", n->character.id, n->copies, n->level);
-    }
     fprintf(f, "meta %d %d %d\n", g->pity5, g->pity4, g->featured_guaranteed);
     fclose(f);
-    puts("Collection saved to save.txt.");
+    printf("Game saved to %s.\n", path);
 }
 
 void game_load_collection(Game *g, const char *path) {
     FILE *f = fopen(path, "r");
-    if (!f) {
-        return;
-    }
-
-    char id[ID_LEN];
-    int copies, level;
+    if (!f) return;
+    char id[ID_LEN]; int copies, level;
     while (fscanf(f, "%31s %d %d", id, &copies, &level) == 3) {
-        if (strcmp(id, "meta") == 0) {
-            int pity5, pity4, featured;
-            if (fscanf(f, "%d %d %d", &pity5, &pity4, &featured) == 3) {
-                g->pity5 = pity5;
-                g->pity4 = pity4;
-                g->featured_guaranteed = featured;
+        if (!strcmp(id, "meta")) {
+            int p5, p4, guarantee;
+            if (fscanf(f, "%d %d %d", &p5, &p4, &guarantee) == 3) {
+                if (p5 >= 0 && p5 < 90) g->pity5 = p5;
+                if (p4 >= 0 && p4 < 10) g->pity4 = p4;
+                g->featured_guaranteed = guarantee != 0;
             }
             continue;
         }
-
         Character *c = hash_table_find(&g->catalogue, id);
-        if (c) {
-            collection_add(&g->collection, c);
-            for (OwnedNode *n = g->collection.head; n; n = n->next) {
-                if (strcmp(n->character.id, id) == 0) {
-                    n->copies = copies;
-                    n->level = level;
-                    break;
-                }
-            }
-        }
+        if (!c || copies < 1 || level < 1 || level > 6) continue;
+        if (collection_add(&g->collection, c) < 0) continue;
+        OwnedNode *n = find_owned(g, id);
+        if (n) { n->copies = copies; n->level = level; }
     }
     fclose(f);
 }

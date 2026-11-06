@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
 #include "include/hash_table.h"
 
 static unsigned long hash_id(const char *s) {
@@ -32,12 +31,14 @@ Character *hash_table_find(HashTable *t, const char *id) {
 }
 
 void hash_table_print(const HashTable *t) {
-    puts("\n=== CHARACTER CATALOGUE (HASH BUCKETS) ===");
+    puts("\n=== ANIMAL ROSTER ===");
     for (int i = 0; i < HASH_BUCKETS; i++) {
-        printf("[%02d]", i);
-        for (HashNode *n = t->buckets[i]; n; n = n->next)
-            printf(" -> %s(%s)", n->value.name, n->value.id);
-        puts(" -> NULL");
+        for (HashNode *n = t->buckets[i]; n; n = n->next) {
+            const Character *c = &n->value;
+            printf("\n★%d  %s — %s | HP %d  ATK %d  DEF %d  SPD %d\n",
+                   c->rarity, c->name, c->role, c->hp, c->attack, c->defense, c->speed);
+            character_print_art(c);
+        }
     }
 }
 
